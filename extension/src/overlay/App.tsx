@@ -1,26 +1,27 @@
 import { useEffect, useState } from 'react';
 import type { AdviceFrame, LocalAnalysis, MoveAnnotation, SpeedVerdict, WinConTag } from '../lib/types';
 
-const TAG_STYLE: Record<WinConTag, { label: string; color: string }> = {
-  MUST_PRESERVE: { label: 'MUST PRESERVE', color: '#e5484d' },
-  FLEXIBLE: { label: 'FLEXIBLE', color: '#f5a623' },
-  SAFE_TO_SACRIFICE: { label: 'SAFE TO SAC', color: '#30a46c' },
+const TAG_CHIP: Record<WinConTag, { label: string; cls: string }> = {
+  MUST_PRESERVE: { label: 'MUST PRESERVE', cls: 'chip chip-red' },
+  FLEXIBLE: { label: 'FLEXIBLE', cls: 'chip chip-amber' },
+  SAFE_TO_SACRIFICE: { label: 'SAFE TO SAC', cls: 'chip chip-green' },
 };
 
-const SPEED_STYLE: Record<SpeedVerdict, { label: string; color: string }> = {
-  FASTER: { label: 'you outspeed', color: '#30a46c' },
-  RANGE: { label: 'speed range', color: '#f5a623' },
-  SLOWER: { label: 'outspeeds you', color: '#e5484d' },
+const SPEED_CHIP: Record<SpeedVerdict, { label: string; cls: string }> = {
+  FASTER: { label: 'you outspeed', cls: 'chip chip-green' },
+  RANGE: { label: 'speed range', cls: 'chip chip-amber' },
+  SLOWER: { label: 'outspeeds you', cls: 'chip chip-red' },
 };
 
 /**
- * Panel sections: win-con tags + opponent intel come from the backend
- * (AdviceFrame, once per turn); damage and speed come from the client-side
- * calc (LocalAnalysis, on every state change). Hidden outside of battles.
+ * Sections: win-con tags + opponent intel come from the backend (AdviceFrame,
+ * once per turn); damage and speed come from the client-side calc
+ * (LocalAnalysis, on every state change). Hidden outside of battles.
  */
 export function App() {
   const [frame, setFrame] = useState<AdviceFrame | null>(null);
   const [local, setLocal] = useState<LocalAnalysis | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     const onAdvice = (ev: Event) => setFrame((ev as CustomEvent<AdviceFrame>).detail);
@@ -41,102 +42,105 @@ export function App() {
 
   if (!frame && !local) return null;
 
+  const winProb = frame?.overallWinProb ?? null;
+  const winCls = winProb == null ? '' : winProb >= 0.55 ? 'win-good' : winProb >= 0.45 ? 'win-even' : 'win-bad';
   const oppActiveSet = frame?.opponent.sets.find((s) => s.species === local?.oppActive);
 
   return (
-    <div style={panelStyle}>
-      <div style={{ fontWeight: 700, marginBottom: 6 }}>
-        Poké-Copilot{frame ? ` — turn ${frame.turn} · win ${(frame.overallWinProb * 100).toFixed(0)}%` : ''}
-        {frame && <span style={{ float: 'right', opacity: 0.5 }}>{frame.latencyMs}ms</span>}
+    <div className="card">
+      <div className="header" onClick={() => setCollapsed((c) => !c)} title="Click to collapse/expand">
+        <span className="logo" />
+        <span className="title">Poké-Copilot</span>
+        <span className="turn">{frame ? `turn ${frame.turn}` : ''}</span>
+        {frame && <span className="latency">{frame.latencyMs}ms</span>}
+        {winProb != null && <span className={`win-pill ${winCls}`}>{Math.round(winProb * 100)}% win</span>}
+        <span className="chev">{collapsed ? '▸' : '▾'}</span>
       </div>
 
-      {frame && frame.assessments.length > 0 && (
-        <Section title="Bench value">
-          {frame.assessments.map((a) => (
-            <Row key={a.species}>
-              <span style={{ minWidth: 90 }}>{a.species}</span>
-              <Chip
-                color={TAG_STYLE[a.tag].color}
-                title={`${a.reason} (win% if lost: ${(a.winProbIfLost * 100).toFixed(0)} vs preserved: ${(a.winProbIfPreserved * 100).toFixed(0)})`}
-              >
-                {TAG_STYLE[a.tag].label}
-              </Chip>
-            </Row>
-          ))}
-        </Section>
-      )}
-
-      {local && local.ourActive && local.oppActive && (
-        <Section title={`Matchup — ${local.ourActive} vs ${local.oppActive} (est.)`}>
-          {local.ourMoves.map((m) => (
-            <DamageRow key={`our-${m.move}`} m={m} prefix="▸" />
-          ))}
-          {local.theirMoves.length > 0 && (
-            <div style={{ opacity: 0.85, marginTop: 4 }}>
-              <div style={{ fontSize: 11, opacity: 0.7 }}>their revealed moves vs you:</div>
-              {local.theirMoves.map((m) => (
-                <DamageRow key={`their-${m.move}`} m={m} prefix="◂" />
+      {!collapsed && (
+        <div className="body">
+          {frame && frame.assessments.length > 0 && (
+            <Section title="Bench value">
+              {frame.assessments.map((a) => (
+                <div className="row" key={a.species}>
+                  <span className="name">{a.species}</span>
+                  <span style={{ flex: 1 }} />
+                  <span
+                    className={TAG_CHIP[a.tag].cls}
+                    title={`${a.reason} — win% if lost: ${Math.round(a.winProbIfLost * 100)} vs preserved: ${Math.round(a.winProbIfPreserved * 100)}`}
+                  >
+                    {TAG_CHIP[a.tag].label}
+                  </span>
+                </div>
               ))}
-            </div>
+            </Section>
           )}
-        </Section>
-      )}
 
-      {local && local.speedTiers.length > 0 && (
-        <Section title={`Speed — your ${local.ourActive} (${local.ourSpeed})`}>
-          {local.speedTiers.map((s) => (
-            <Row key={s.species}>
-              <span style={{ minWidth: 110 }}>{s.species}</span>
-              <span style={{ opacity: 0.6, fontSize: 11, minWidth: 62 }}>
-                {s.minSpe}–{s.maxSpe}
-              </span>
-              <Chip color={SPEED_STYLE[s.verdict].color}>{SPEED_STYLE[s.verdict].label}</Chip>
-            </Row>
-          ))}
-        </Section>
-      )}
-
-      {frame && (frame.opponent.unrevealed.length > 0 || oppActiveSet) && (
-        <Section title="Opponent intel (Bayesian)">
-          {oppActiveSet && (
-            <div style={{ marginBottom: 4 }}>
-              <div style={{ fontSize: 11, opacity: 0.7 }}>{oppActiveSet.species} likely runs:</div>
-              {oppActiveSet.moves.slice(0, 4).map((m) => (
-                <Row key={m.name}>
-                  <span style={{ minWidth: 130 }}>{m.name}</span>
-                  <Prob p={m.probability} />
-                </Row>
+          {local && local.ourActive && local.oppActive && local.ourMoves.length > 0 && (
+            <Section title={`${local.ourActive} vs ${local.oppActive}`}>
+              {local.ourMoves.map((m) => (
+                <DamageRow key={`our-${m.move}`} m={m} mine />
               ))}
-              {oppActiveSet.item[0] && (
-                <Row>
-                  <span style={{ minWidth: 130 }}>item: {oppActiveSet.item[0].name}</span>
-                  <Prob p={oppActiveSet.item[0].probability} />
-                </Row>
+              {local.theirMoves.length > 0 && (
+                <>
+                  <div className="subhead">their revealed moves vs you</div>
+                  {local.theirMoves.map((m) => (
+                    <DamageRow key={`their-${m.move}`} m={m} mine={false} />
+                  ))}
+                </>
               )}
-            </div>
+            </Section>
           )}
-          {frame.opponent.unrevealed.length > 0 && (
-            <div>
-              <div style={{ fontSize: 11, opacity: 0.7 }}>unrevealed teammates:</div>
-              {frame.opponent.unrevealed.map((t) => (
-                <Row key={t.name}>
-                  <span style={{ minWidth: 130 }}>{t.name}</span>
-                  <Prob p={t.probability} />
-                </Row>
-              ))}
-            </div>
-          )}
-        </Section>
-      )}
 
-      {frame && frame.pathway.length > 0 && (
-        <Section title="Best line">
-          {frame.pathway.map((s) => (
-            <div key={s.turn} style={{ fontSize: 12, opacity: 0.9 }}>
-              T{s.turn}: {s.action} — <em>{s.rationale}</em>
-            </div>
-          ))}
-        </Section>
+          {local && local.speedTiers.length > 0 && (
+            <Section title={`Speed · ${local.ourActive} (${local.ourSpeed})`}>
+              {local.speedTiers.map((s) => (
+                <div className="row" key={s.species}>
+                  <span className="name">{s.species}</span>
+                  <span className="muted mono">
+                    {s.minSpe}–{s.maxSpe}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <span className={SPEED_CHIP[s.verdict].cls}>{SPEED_CHIP[s.verdict].label}</span>
+                </div>
+              ))}
+            </Section>
+          )}
+
+          {frame && (frame.opponent.unrevealed.length > 0 || oppActiveSet) && (
+            <Section title="Opponent intel">
+              {oppActiveSet && (
+                <>
+                  <div className="subhead">{oppActiveSet.species} likely runs</div>
+                  {oppActiveSet.moves.slice(0, 4).map((m) => (
+                    <ProbRow key={m.name} name={m.name} p={m.probability} />
+                  ))}
+                  {oppActiveSet.item[0] && (
+                    <ProbRow name={`item · ${oppActiveSet.item[0].name}`} p={oppActiveSet.item[0].probability} />
+                  )}
+                </>
+              )}
+              {frame.opponent.unrevealed.length > 0 && (
+                <>
+                  <div className="subhead">unrevealed teammates</div>
+                  {frame.opponent.unrevealed.map((t) => (
+                    <ProbRow key={t.name} name={t.name} p={t.probability} />
+                  ))}
+                </>
+              )}
+            </Section>
+          )}
+
+          {frame && frame.pathway.length > 0 && (
+            <Section title="Best line">
+              {frame.pathway.map((s) => (
+                <div className="pathway" key={s.turn}>
+                  T{s.turn}: {s.action} — <em>{s.rationale}</em>
+                </div>
+              ))}
+            </Section>
+          )}
+        </div>
       )}
     </div>
   );
@@ -144,61 +148,45 @@ export function App() {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginTop: 8, borderTop: '1px solid #3a3a3f', paddingTop: 6 }}>
-      <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 2 }}>{title}</div>
+    <div className="section">
+      <div className="section-title">{title}</div>
       {children}
     </div>
   );
 }
 
-function Row({ children }: { children: React.ReactNode }) {
-  return <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '1px 0' }}>{children}</div>;
-}
-
-function Chip({ color, title, children }: { color: string; title?: string; children: React.ReactNode }) {
+function DamageRow({ m, mine }: { m: MoveAnnotation; mine: boolean }) {
+  const width = Math.min(m.maxPct, 100);
   return (
-    <span
-      title={title}
-      style={{
-        background: color,
-        color: '#fff',
-        borderRadius: 4,
-        padding: '1px 6px',
-        fontSize: 11,
-        fontWeight: 700,
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {children}
-    </span>
+    <>
+      <div className="row">
+        <span className="name" style={{ minWidth: 92 }}>
+          {m.move}
+        </span>
+        <span className="bar">
+          <span className={`bar-fill ${mine ? 'fill-us' : 'fill-them'}`} style={{ display: 'block', width: `${width}%` }} />
+        </span>
+        <span className="pct mono">
+          {m.minPct}–{m.maxPct}%
+        </span>
+      </div>
+      {m.koChance && <div className="ko">{m.koChance}</div>}
+    </>
   );
 }
 
-function DamageRow({ m, prefix }: { m: MoveAnnotation; prefix: string }) {
+function ProbRow({ name, p }: { name: string; p: number }) {
   return (
-    <Row>
-      <span style={{ opacity: 0.5 }}>{prefix}</span>
-      <span style={{ minWidth: 110 }}>{m.move}</span>
-      <span style={{ minWidth: 76, fontVariantNumeric: 'tabular-nums' }}>
-        {m.minPct}–{m.maxPct}%
+    <div className="row">
+      <span className="name" style={{ minWidth: 118 }}>
+        {name}
       </span>
-      <span style={{ fontSize: 11, opacity: 0.7 }}>{m.koChance}</span>
-    </Row>
+      <span className="bar">
+        <span className="bar-fill fill-prob" style={{ display: 'block', width: `${Math.round(p * 100)}%` }} />
+      </span>
+      <span className="muted mono" style={{ minWidth: 34, textAlign: 'right' }}>
+        {Math.round(p * 100)}%
+      </span>
+    </div>
   );
 }
-
-function Prob({ p }: { p: number }) {
-  return <span style={{ fontSize: 11, opacity: 0.7 }}>{(p * 100).toFixed(0)}%</span>;
-}
-
-// Positioning lives on the container (overlay/main.tsx); this is visual-only.
-const panelStyle: React.CSSProperties = {
-  background: 'rgba(24, 24, 27, 0.95)',
-  color: '#fafafa',
-  font: '13px/1.4 system-ui, sans-serif',
-  borderRadius: 8,
-  padding: 12,
-  boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
-  maxHeight: '60vh',
-  overflowY: 'auto',
-};
