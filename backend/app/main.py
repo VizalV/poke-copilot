@@ -44,12 +44,19 @@ async def battle_ws(ws: WebSocket) -> None:
 
             if msg["type"] == "protocol-chunk":
                 turn_ended = tracker.ingest_chunk(msg["chunk"])
-                if turn_ended:
-                    start = time.monotonic()
-                    frame = await analyze_win_conditions(tracker)
-                    frame.latency_ms = int((time.monotonic() - start) * 1000)
-                    await ws.send_text(frame.model_dump_json(by_alias=True))
+                # Replayed history rebuilds state only; one analysis follows at the end.
+                if turn_ended and not msg.get("replay"):
+                    await _send_advice(ws, tracker)
             elif msg["type"] == "battle-request":
                 tracker.ingest_request(msg["request"])
+            elif msg["type"] == "analyze":
+                await _send_advice(ws, tracker)
     except WebSocketDisconnect:
         pass
+
+
+async def _send_advice(ws: WebSocket, tracker: BattleTracker) -> None:
+    start = time.monotonic()
+    frame = await analyze_win_conditions(tracker)
+    frame.latency_ms = int((time.monotonic() - start) * 1000)
+    await ws.send_text(frame.model_dump_json(by_alias=True))

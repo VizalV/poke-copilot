@@ -1,20 +1,31 @@
 /**
- * Client-side damage annotations and speed tiers via @smogon/calc.
+ * Client-side damage annotations via @smogon/calc.
  *
- * Accuracy notes (v1): our own item/ability/level come from |request|, but EV
- * spreads are unknown for both sides, so calcs use neutral 0-EV sets — treat
- * percentages as estimates. Speed uses our TRUE stat (from |request|) against
- * the opponent's theoretical min (0 EV neutral) / max (252 EV, +nature) roll.
- * Boosts, screens, weather, and items like Choice Scarf are not yet modeled.
+ * Accuracy comes from two sources rather than guessing:
+ *  - our side uses the TRUE final stats, item and ability from |request|
+ *  - the opponent uses the Bayesian predictor's most likely nature / EV spread
+ *    / item / ability (from the backend's AdviceFrame), falling back to a
+ *    neutral 0-EV set before the first prediction arrives.
+ *
+ * Not yet modelled: boosts, screens, weather/terrain, Tera.
  */
 import { calculate, Generations, Move, Pokemon } from '@smogon/calc';
 
-import type { BattleSnapshot } from './protocol';
-import type { LocalAnalysis, MoveAnnotation, SpeedRow, SpeedVerdict } from './types';
+import type { BattleSnapshot, RequestPokemon } from './protocol';
+import type { LocalAnalysis, MoveAnnotation, OpponentSet } from './types';
 
 const gen = Generations.get(9);
 
-export function analyzeLocally(snap: BattleSnapshot): LocalAnalysis {
+const STAT_KEYS: Record<string, string> = {
+  HP: 'hp',
+  Atk: 'atk',
+  Def: 'def',
+  SpA: 'spa',
+  SpD: 'spd',
+  Spe: 'spe',
+};
+
+export function analyzeLocally(snap: BattleSnapshot, predictedSets: OpponentSet[] = []): LocalAnalysis {
   const us = snap.playerSide;
   const them = us === 'p1' ? 'p2' : 'p1';
   const empty: LocalAnalysis = {
@@ -23,66 +34,79 @@ export function analyzeLocally(snap: BattleSnapshot): LocalAnalysis {
     oppActive: null,
     ourMoves: [],
     theirMoves: [],
-    ourSpeed: null,
-    speedTiers: [],
+    oppSetLabel: null,
   };
   if (!us || !snap.request) return empty;
 
   const ourActive = snap[us].active;
   const oppActive = snap[them].active;
   const ourReqMon = snap.request.side.pokemon.find((p) => p.active);
+  if (!ourActive || !oppActive || !ourReqMon) return { ...empty, ourActive, oppActive };
 
-  const analysis: LocalAnalysis = {
-    ...empty,
+  const predicted = predictedSets.find((s) => s.species === oppActive);
+  const attacker = buildOurMon(ourActive, snap[us].mons[ourActive]?.level ?? 100, ourReqMon);
+  const defender = buildOppMon(oppActive, snap[them].mons[oppActive]?.level ?? 100, predicted);
+  if (!attacker || !defender) return { ...empty, ourActive, oppActive };
+
+  const ourMoveNames =
+    snap.request.active?.[0]?.moves.filter((m) => !m.disabled).map((m) => m.move) ?? ourReqMon.moves;
+
+  return {
+    roomid: snap.roomid,
     ourActive,
     oppActive,
-    ourSpeed: ourReqMon?.stats.spe ?? null,
+    ourMoves: annotateMoves(ourMoveNames, attacker, defender),
+    theirMoves: annotateMoves(snap[them].mons[oppActive]?.revealedMoves ?? [], defender, attacker),
+    oppSetLabel: describeSet(predicted),
   };
-
-  // --- damage annotations (both directions, vs. the two actives) ----------
-  if (ourActive && oppActive && ourReqMon) {
-    const ourLevel = levelOf(snap, us, ourActive);
-    const oppLevel = levelOf(snap, them, oppActive);
-    const attacker = safePokemon(ourActive, {
-      level: ourLevel,
-      item: ourReqMon.item,
-      ability: ourReqMon.ability,
-    });
-    const defender = safePokemon(oppActive, { level: oppLevel });
-    if (attacker && defender) {
-      const ourMoveNames =
-        snap.request.active?.[0]?.moves.filter((m) => !m.disabled).map((m) => m.move) ??
-        ourReqMon.moves;
-      analysis.ourMoves = annotateMoves(ourMoveNames, attacker, defender);
-      analysis.theirMoves = annotateMoves(
-        snap[them].mons[oppActive]?.revealedMoves ?? [],
-        defender,
-        attacker,
-      );
-    }
-  }
-
-  // --- speed tiers: our active's true speed vs. every revealed opp mon ----
-  if (analysis.ourSpeed != null) {
-    analysis.speedTiers = Object.values(snap[them].mons)
-      .filter((m) => m.hpFraction > 0)
-      .map((m) => speedRow(m.species, m.level, analysis.ourSpeed!))
-      .filter((row): row is SpeedRow => row !== null)
-      .sort((a, b) => b.maxSpe - a.maxSpe);
-  }
-
-  return analysis;
 }
 
-function levelOf(snap: BattleSnapshot, side: 'p1' | 'p2', species: string): number {
-  return snap[side].mons[species]?.level ?? 100;
+/** Our side: exact stats straight from |request|, so percentages are real. */
+function buildOurMon(species: string, level: number, req: RequestPokemon): Pokemon | null {
+  const mon = safePokemon(species, { level, item: req.item, ability: req.ability });
+  if (!mon) return null;
+  const maxHP = Number(req.condition.split(' ')[0].split('/')[1]);
+  Object.assign(mon.stats, req.stats);
+  if (Number.isFinite(maxHP) && maxHP > 0) mon.stats.hp = maxHP;
+  return mon;
 }
 
-function safePokemon(species: string, opts: ConstructorParameters<typeof Pokemon>[2]): Pokemon | null {
+/** Opponent: predicted set if the backend has one, else neutral 0 EVs. */
+function buildOppMon(species: string, level: number, set?: OpponentSet): Pokemon | null {
+  const opts: Record<string, unknown> = { level };
+  if (set) {
+    if (set.item[0]) opts.item = set.item[0].name;
+    if (set.ability[0]) opts.ability = set.ability[0].name;
+    if (set.nature?.[0]) opts.nature = set.nature[0].name;
+    const evs = parseEVs(set.evSpread?.[0]?.name);
+    if (evs) opts.evs = evs;
+  }
+  return safePokemon(species, opts) ?? safePokemon(species, { level });
+}
+
+/** "252 Atk / 252 Spe" -> { atk: 252, spe: 252 } */
+function parseEVs(spread?: string): Record<string, number> | null {
+  if (!spread || spread.startsWith('No major')) return null;
+  const evs: Record<string, number> = {};
+  for (const part of spread.split('/')) {
+    const m = part.trim().match(/^(\d+)\s+(HP|Atk|Def|SpA|SpD|Spe)$/);
+    if (m) evs[STAT_KEYS[m[2]]] = Number(m[1]);
+  }
+  return Object.keys(evs).length ? evs : null;
+}
+
+function describeSet(set?: OpponentSet): string | null {
+  if (!set) return null;
+  const bits = [set.nature?.[0]?.name, set.evSpread?.[0]?.name, set.item[0]?.name].filter(Boolean);
+  return bits.length ? `predicted ${bits.join(' · ')}` : null;
+}
+
+function safePokemon(species: string, opts: Record<string, unknown>): Pokemon | null {
   try {
-    return new Pokemon(gen, species, opts);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- calc's option type is stricter than our dynamic set
+    return new Pokemon(gen, species, opts as any);
   } catch {
-    return null; // species string the calc data doesn't know (rare forms)
+    return null; // species/item/ability the calc data doesn't know (rare forms)
   }
 }
 
@@ -93,6 +117,7 @@ function annotateMoves(moveNames: string[], attacker: Pokemon, defender: Pokemon
       const result = calculate(gen, attacker, defender, new Move(gen, name));
       const [min, max] = result.range();
       const maxHP = defender.maxHP();
+      if (!maxHP) continue;
       let koChance = '';
       try {
         if (max > 0) koChance = result.kochance().text;
@@ -110,20 +135,4 @@ function annotateMoves(moveNames: string[], attacker: Pokemon, defender: Pokemon
     }
   }
   return out.sort((a, b) => b.maxPct - a.maxPct);
-}
-
-function speedRow(species: string, level: number, ourSpeed: number): SpeedRow | null {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- @smogon/calc wants its branded ID type
-  const data = gen.species.get(toID(species) as any);
-  if (!data) return null;
-  const base = data.baseStats.spe;
-  // Standard stat formulas at 31 IV: min = 0 EV neutral, max = 252 EV +nature.
-  const minSpe = Math.floor(((2 * base + 31) * level) / 100 + 5);
-  const maxSpe = Math.floor((Math.floor(((2 * base + 31 + 63) * level) / 100 + 5)) * 1.1);
-  const verdict: SpeedVerdict = ourSpeed > maxSpe ? 'FASTER' : ourSpeed < minSpe ? 'SLOWER' : 'RANGE';
-  return { species, minSpe, maxSpe, verdict };
-}
-
-function toID(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '');
 }

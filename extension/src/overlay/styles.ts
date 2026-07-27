@@ -20,10 +20,13 @@ export const OVERLAY_CSS = `
   padding: 10px 12px;
   background: linear-gradient(135deg, #1e1e2a 0%, #17171c 100%);
   border-bottom: 1px solid #2c2c36;
-  cursor: pointer;
+  cursor: grab;
   user-select: none;
+  touch-action: none;
 }
+.header:active { cursor: grabbing; }
 .logo { width: 8px; height: 8px; border-radius: 50%; background: #6c8cff; box-shadow: 0 0 8px #6c8cff; }
+.logo-off { background: #ef5d67; box-shadow: 0 0 8px #ef5d67; }
 .title { font-weight: 700; font-size: 13px; }
 .turn { color: #9a9aa5; font-size: 11px; flex: 1; }
 .latency { color: #55555f; font-size: 10px; }

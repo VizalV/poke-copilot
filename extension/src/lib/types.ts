@@ -35,6 +35,7 @@ export interface OpponentSet {
   moves: ComponentGuess[];
   item: ComponentGuess[];
   ability: ComponentGuess[];
+  nature: ComponentGuess[];
   evSpread: ComponentGuess[];
 }
 
@@ -64,21 +65,12 @@ export interface MoveAnnotation {
   koChance: string; // e.g. "guaranteed 2HKO", "" if n/a
 }
 
-export type SpeedVerdict = 'FASTER' | 'RANGE' | 'SLOWER';
-
-export interface SpeedRow {
-  species: string;
-  minSpe: number; // 0 EV neutral at their level
-  maxSpe: number; // 252 EV +nature at their level
-  verdict: SpeedVerdict; // our active vs. this mon
-}
-
 export interface LocalAnalysis {
   roomid: string;
   ourActive: string | null;
   oppActive: string | null;
   ourMoves: MoveAnnotation[]; // our active's moves vs. their active
   theirMoves: MoveAnnotation[]; // their revealed moves vs. our active
-  ourSpeed: number | null; // true stat from |request|
-  speedTiers: SpeedRow[];
+  /** e.g. "predicted Timid · 252 SpA / 252 Spe · Air Balloon", null before intel arrives. */
+  oppSetLabel: string | null;
 }

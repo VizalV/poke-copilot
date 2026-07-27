@@ -21,6 +21,7 @@ export function mountOverlay(): void {
     zIndex: '2147483647',
     display: 'none',
   });
+  restorePosition(host);
   document.body.appendChild(host);
 
   const shadow = host.attachShadow({ mode: 'open' });
@@ -36,4 +37,22 @@ export function mountOverlay(): void {
     const controls = document.querySelector<HTMLElement>('.battle-controls');
     host.style.display = controls && controls.offsetParent ? '' : 'none';
   }, 1000);
+}
+
+/** Restore the last dragged position (saved by the App header drag handler). */
+function restorePosition(host: HTMLElement): void {
+  try {
+    const saved = localStorage.getItem('poke-copilot:pos');
+    if (!saved) return;
+    const { left, top } = JSON.parse(saved) as { left: string; top: string };
+    if (!left || !top) return;
+    // Clamp to the viewport in case the window shrank since last session.
+    const x = Math.min(parseInt(left, 10), window.innerWidth - 320);
+    const y = Math.min(parseInt(top, 10), window.innerHeight - 48);
+    host.style.left = `${Math.max(0, x)}px`;
+    host.style.top = `${Math.max(0, y)}px`;
+    host.style.right = 'auto';
+  } catch {
+    /* corrupted/unavailable storage — keep the default top-right spot */
+  }
 }

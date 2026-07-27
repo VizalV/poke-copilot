@@ -1,16 +1,10 @@
-import { useEffect, useState } from 'react';
-import type { AdviceFrame, LocalAnalysis, MoveAnnotation, SpeedVerdict, WinConTag } from '../lib/types';
+import { useEffect, useRef, useState } from 'react';
+import type { AdviceFrame, LocalAnalysis, MoveAnnotation, WinConTag } from '../lib/types';
 
 const TAG_CHIP: Record<WinConTag, { label: string; cls: string }> = {
   MUST_PRESERVE: { label: 'MUST PRESERVE', cls: 'chip chip-red' },
   FLEXIBLE: { label: 'FLEXIBLE', cls: 'chip chip-amber' },
   SAFE_TO_SACRIFICE: { label: 'SAFE TO SAC', cls: 'chip chip-green' },
-};
-
-const SPEED_CHIP: Record<SpeedVerdict, { label: string; cls: string }> = {
-  FASTER: { label: 'you outspeed', cls: 'chip chip-green' },
-  RANGE: { label: 'speed range', cls: 'chip chip-amber' },
-  SLOWER: { label: 'outspeeds you', cls: 'chip chip-red' },
 };
 
 /**
@@ -22,6 +16,51 @@ export function App() {
   const [frame, setFrame] = useState<AdviceFrame | null>(null);
   const [local, setLocal] = useState<LocalAnalysis | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const justDragged = useRef(false);
+
+  /** Drag the whole panel by its header; a real click (no movement) still toggles collapse. */
+  const onHeaderPointerDown = (e: React.PointerEvent) => {
+    const host = document.getElementById('poke-copilot-root');
+    if (!host || e.button !== 0) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const rect = host.getBoundingClientRect();
+    let dragging = false;
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      if (!dragging && Math.abs(dx) + Math.abs(dy) < 5) return;
+      dragging = true;
+      const left = Math.min(Math.max(rect.left + dx, 0), window.innerWidth - rect.width);
+      const top = Math.min(Math.max(rect.top + dy, 0), window.innerHeight - 48);
+      host.style.left = `${left}px`;
+      host.style.top = `${top}px`;
+      host.style.right = 'auto';
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (dragging) {
+        justDragged.current = true;
+        try {
+          localStorage.setItem('poke-copilot:pos', JSON.stringify({ left: host.style.left, top: host.style.top }));
+        } catch {
+          /* storage may be unavailable; position just won't persist */
+        }
+      }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
+  const onHeaderClick = () => {
+    if (justDragged.current) {
+      justDragged.current = false;
+      return;
+    }
+    setCollapsed((c) => !c);
+  };
 
   useEffect(() => {
     const onAdvice = (ev: Event) => setFrame((ev as CustomEvent<AdviceFrame>).detail);
@@ -30,13 +69,16 @@ export function App() {
       setFrame(null);
       setLocal(null);
     };
+    const onStatus = (ev: Event) => setConnected((ev as CustomEvent<{ connected: boolean }>).detail.connected);
     window.addEventListener('poke-copilot:advice', onAdvice);
     window.addEventListener('poke-copilot:local', onLocal);
     window.addEventListener('poke-copilot:battle-end', onEnd);
+    window.addEventListener('poke-copilot:status', onStatus);
     return () => {
       window.removeEventListener('poke-copilot:advice', onAdvice);
       window.removeEventListener('poke-copilot:local', onLocal);
       window.removeEventListener('poke-copilot:battle-end', onEnd);
+      window.removeEventListener('poke-copilot:status', onStatus);
     };
   }, []);
 
@@ -48,8 +90,16 @@ export function App() {
 
   return (
     <div className="card">
-      <div className="header" onClick={() => setCollapsed((c) => !c)} title="Click to collapse/expand">
-        <span className="logo" />
+      <div
+        className="header"
+        onPointerDown={onHeaderPointerDown}
+        onClick={onHeaderClick}
+        title="Drag to move · click to collapse/expand"
+      >
+        <span
+          className={connected ? 'logo' : 'logo logo-off'}
+          title={connected ? 'Backend connected' : 'Backend offline — check the SSH tunnel and uvicorn'}
+        />
         <span className="title">Poké-Copilot</span>
         <span className="turn">{frame ? `turn ${frame.turn}` : ''}</span>
         {frame && <span className="latency">{frame.latencyMs}ms</span>}
@@ -78,6 +128,7 @@ export function App() {
 
           {local && local.ourActive && local.oppActive && local.ourMoves.length > 0 && (
             <Section title={`${local.ourActive} vs ${local.oppActive}`}>
+              {local.oppSetLabel && <div className="subhead">{local.oppSetLabel}</div>}
               {local.ourMoves.map((m) => (
                 <DamageRow key={`our-${m.move}`} m={m} mine />
               ))}
@@ -89,21 +140,6 @@ export function App() {
                   ))}
                 </>
               )}
-            </Section>
-          )}
-
-          {local && local.speedTiers.length > 0 && (
-            <Section title={`Speed · ${local.ourActive} (${local.ourSpeed})`}>
-              {local.speedTiers.map((s) => (
-                <div className="row" key={s.species}>
-                  <span className="name">{s.species}</span>
-                  <span className="muted mono">
-                    {s.minSpe}–{s.maxSpe}
-                  </span>
-                  <span style={{ flex: 1 }} />
-                  <span className={SPEED_CHIP[s.verdict].cls}>{SPEED_CHIP[s.verdict].label}</span>
-                </div>
-              ))}
             </Section>
           )}
 

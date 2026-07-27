@@ -46,6 +46,9 @@ def _serialize_state(tracker: BattleTracker, removed: str | None) -> str:
         for mon in tracker.mons[side_id].values():
             if mon.species == removed and side_label == "Player":
                 continue  # counterfactual: this mon has been lost
+            if mon.fainted:
+                lines.append(f"{side_label} {mon.species}: FAINTED")
+                continue
             status = f" status:{mon.status}" if mon.status else ""
             active = " (active)" if mon.is_active else ""
             moves = f" moves:{','.join(mon.revealed_moves)}" if mon.revealed_moves else ""

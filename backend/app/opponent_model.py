@@ -43,8 +43,13 @@ class OpponentIntel(BaseModel):
 
 
 async def predict_opponent(tracker: BattleTracker) -> OpponentIntel:
+    if tracker.player_side is None:
+        return OpponentIntel()
+    # Fainted mons still inform teammate prediction (they were on the team),
+    # but their sets are no longer actionable, so we drop them from the output.
     revealed = [m.species for m in tracker.mons[tracker.opponent_side].values()]
-    if not revealed or tracker.player_side is None:
+    alive = {m.species for m in tracker.living_opponents()}
+    if not revealed:
         return OpponentIntel()
     observed_moves = {
         m.species: m.revealed_moves
@@ -70,5 +75,6 @@ async def predict_opponent(tracker: BattleTracker) -> OpponentIntel:
         sets=[
             OpponentSet(species=species, **components)
             for species, components in data.get("sets", {}).items()
+            if species in alive
         ],
     )

@@ -19,7 +19,9 @@
       unrevealed teammates + likely sets now ship in every AdviceFrame
 - [x] Client-side damage annotations via @smogon/calc (`extension/src/lib/calc.ts`) —
       our moves vs. their active and their revealed moves vs. us, no backend round-trip
-- [x] Speed-tier strip: our true speed (from |request|) vs. opponent min/max rolls
+- [x] ~~Speed-tier strip~~ — removed 2026-07-27, min/max ranges were too vague to act on
+- [x] Damage calc uses real sets: our true stats/item/ability from |request|, opponent's
+      predicted nature/EVs/item from the Bayesian model (not 0-EV guesses)
 - [x] Overlay anchors below battle controls; hidden outside battles, clears on |win|/|tie|
 - [ ] Feed predicted sets into the LLM value prompt (needs LLM serving)
 - [ ] Show top-3 predicted opponent *actions* (move-level) with probabilities
