@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Poké-Copilot",
+  "version": "0.1.0",
+  "description": "Real-time AI win-condition analysis for Pokémon Showdown battles.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://play.pokemonshowdown.com/*", "http://localhost/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://play.pokemonshowdown.com/*", "http://localhost:8000/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["https://play.pokemonshowdown.com/*", "http://localhost:8000/*"]
+    }
+  ]
+}
